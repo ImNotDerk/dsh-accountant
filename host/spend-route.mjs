@@ -19,12 +19,15 @@ import { attachKeyUsage, resolveActiveKey } from '../skills/accountant/scripts/l
 import { loadConfig, normalizeTags } from '../skills/accountant/scripts/lib/config.mjs'
 import { DEFAULT_FX, DEFAULT_HOLIDAYS, PEAK_RATES, tariffAt } from '../skills/accountant/scripts/lib/pricing.mjs'
 import { collectUsage, defaultCachePath, resolveDataDir } from '../skills/accountant/scripts/lib/session-store.mjs'
+import { loadSessionTags, normalizeTag, saveSessionTag } from '../skills/accountant/scripts/lib/session-tags.mjs'
 
 export const SPEND_PATH = '/accountant/spend'
+export const TAG_PATH = '/accountant/tag'
 export const BALANCE_URL = 'https://api.deepseek.com/user/balance'
 
 const TTL_MS = 20_000
 const BALANCE_TTL_MS = 60_000
+const MAX_BODY_BYTES = 4_096
 
 function totals(bucket) {
   return {
@@ -102,7 +105,7 @@ async function settingsFor(dataDir) {
 }
 
 /** One session's row, or null when no log carries that id. */
-function sessionRow(files, sessionId, settings) {
+function sessionRow(files, sessionId, settings, sessionTags) {
   const file = files.find((entry) => entry.sessionId === sessionId)
   if (file === undefined) return null
   const [row] = sessionTotals([file], {
@@ -111,6 +114,7 @@ function sessionRow(files, sessionId, settings) {
     holidays: settings.holidays,
     rates: settings.rates,
     tags: settings.tags,
+    sessionTags,
   })
   return row ?? null
 }
@@ -118,6 +122,7 @@ function sessionRow(files, sessionId, settings) {
 async function compute(sessionId) {
   const dataDir = resolveDataDir()
   const settings = await settingsFor(dataDir)
+  const sessionTags = await loadSessionTags(dataDir)
   const { files } = await collectUsage({ dataDir, cachePath: defaultCachePath(dataDir) })
   const model = summarize(files, {
     tz: settings.tz,
@@ -125,12 +130,13 @@ async function compute(sessionId) {
     holidays: settings.holidays,
     rates: settings.rates,
     tags: settings.tags,
+    sessionTags,
   })
   await attachKeyUsage(model, files, { dataDir, ...settings })
   model.balance = await fetchBalance(dataDir)
   model.tariff = tariffSnapshot(settings.holidays)
   const body = snapshot(model)
-  body.session = sessionId === null ? null : sessionRow(files, sessionId, settings)
+  body.session = sessionId === null ? null : sessionRow(files, sessionId, settings, sessionTags)
   return body
 }
 
@@ -207,4 +213,77 @@ export function registerSpendRoute(ctx) {
   }
 
   return ctx.webServer.register({ kind: 'exact', path: SPEND_PATH, resource })
+}
+
+function sendJson(res, status, body, headers = {}) {
+  res.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
+    ...headers,
+  })
+  res.end(JSON.stringify(body))
+}
+
+/** Read a small JSON body; a larger one is refused rather than buffered. */
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let size = 0
+    const chunks = []
+    req.on('data', (chunk) => {
+      size += chunk.length
+      if (size > MAX_BODY_BYTES) {
+        req.destroy()
+        reject(new Error('body too large'))
+        return
+      }
+      chunks.push(chunk)
+    })
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+    req.on('error', reject)
+  })
+}
+
+/** Same-origin only: a cross-site POST carries a different Origin host. */
+function sameOrigin(req) {
+  const origin = req.headers.origin
+  if (origin === undefined) return true
+  try {
+    return new URL(origin).host === req.headers.host
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Register the tag write route. A per-session tag set here outranks the
+ * folder tag and survives restarts in `accountant.session-tags.json`.
+ *
+ * @returns {() => void} disposer that removes the route
+ */
+export function registerTagRoute(ctx) {
+  const handler = async (req, res) => {
+    if (!sameOrigin(req)) return sendJson(res, 403, { error: 'origin not allowed' })
+    if (req.method !== 'POST') return sendJson(res, 405, { error: 'method not allowed' }, { allow: 'POST' })
+    if (!String(req.headers['content-type'] ?? '').startsWith('application/json')) {
+      return sendJson(res, 415, { error: 'application/json required' })
+    }
+    try {
+      const parsed = JSON.parse(await readBody(req))
+      const sessionId = typeof parsed?.session === 'string' ? parsed.session : ''
+      if (sessionId === '' || sessionId.length > 128) return sendJson(res, 400, { error: 'invalid session' })
+      if (parsed.tag !== null && parsed.tag !== undefined && typeof parsed.tag !== 'string') {
+        return sendJson(res, 400, { error: 'invalid tag' })
+      }
+      const raw = typeof parsed.tag === 'string' ? parsed.tag : null
+      if (raw !== null && raw.trim() !== '' && normalizeTag(raw) === null) {
+        return sendJson(res, 400, { error: 'tag must be 1-40 printable characters' })
+      }
+      const tag = await saveSessionTag(resolveDataDir(), sessionId, raw)
+      return sendJson(res, 200, { ok: true, tag })
+    } catch {
+      return sendJson(res, 400, { error: 'bad request' })
+    }
+  }
+  return ctx.webServer.register({ kind: 'exact', path: TAG_PATH, handler })
 }

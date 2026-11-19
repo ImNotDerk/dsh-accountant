@@ -273,6 +273,41 @@ test('a peak tariff reads Peak on the chip', async () => {
   assert.match(textOf(await render()), /Peak/)
 })
 
+test('the panel can tag the session it is showing', async () => {
+  const payload = {
+    ...PAYLOAD,
+    session: {
+      id: 'session-1',
+      cwd: '/Users/derk/work/acme',
+      label: 'acme',
+      folderTag: 'work',
+      ownTag: null,
+      tag: 'work',
+      tagSource: 'folder',
+      from: '2026-11-11',
+      to: '2026-11-11',
+      tokens: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0, total: 1 },
+      usd: 0.3,
+      php: 18.6,
+      requests: 2,
+    },
+  }
+  const { calls, render } = await loadBundle({ payload })
+  await render()
+  const loaded = await render()
+  find(loaded, (node) => node.type === 'button').props.onClick()
+
+  const open = await render()
+  const input = find(open, (node) => node.type === 'input')
+  assert.notEqual(input, null)
+  assert.equal(input.props.placeholder, 'work')
+
+  await input.props.onBlur({ target: { value: 'passion' } })
+  const post = calls.find((call) => call.init && call.init.method === 'POST')
+  assert.equal(post.url, '/accountant/tag')
+  assert.deepEqual(JSON.parse(post.init.body), { session: 'session-1', tag: 'passion' })
+})
+
 test('an unreachable endpoint shows a dash, never a made-up number', async () => {
   const { render } = await loadBundle({ payload: null, ok: false })
   await render()

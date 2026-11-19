@@ -5,6 +5,7 @@ window.__ModuleLoader__.load({
     const h = React.createElement;
 
     const ENDPOINT = '/accountant/spend';
+    const TAG_ENDPOINT = '/accountant/tag';
     const POLL_MS = 60_000;
 
     const CSS = `
@@ -70,6 +71,17 @@ window.__ModuleLoader__.load({
       .acc-spend__foot { margin-top: 8px; font-size: 12px; opacity: 0.55; }
 
       .acc-spend__empty { padding: 4px 0; opacity: 0.7; }
+
+      .acc-spend__taginput {
+        width: 132px; min-width: 0;
+        padding: 3px 6px; border-radius: 6px;
+        border: 1px solid var(--dsw-alias-border-l2, rgba(127, 127, 127, 0.28));
+        background: transparent; color: inherit;
+        font: inherit; font-size: 12px; line-height: 1.3;
+      }
+      .acc-spend__taginput:focus-visible { outline: 2px solid var(--dsw-alias-border-focus, #4b7bec); outline-offset: 1px; }
+      .acc-spend__taginput::placeholder { opacity: 0.55; }
+      .acc-spend__taginput:disabled { opacity: 0.5; }
     `;
 
     function peso(value) {
@@ -119,7 +131,51 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function Popover({ data, stale }) {
+    function TagEditor({ session, onTag }) {
+      // A ref, not state: disabling the input mid-save would blur it and fire
+      // the same save again.
+      const saving = React.useRef(false);
+
+      const commit = async (element) => {
+        if (saving.current) return;
+        saving.current = true;
+        const raw = element.value.trim();
+        const ok = await onTag(raw === '' ? null : raw);
+        saving.current = false;
+        if (!ok) element.value = session.ownTag ?? '';
+      };
+
+      return h(
+        'div',
+        { className: 'acc-spend__row' },
+        h('span', { className: 'acc-spend__key' }, 'Tag'),
+        h('input', {
+          className: 'acc-spend__taginput',
+          defaultValue: session.ownTag ?? '',
+          placeholder: session.folderTag ?? session.label,
+          maxLength: 40,
+          'aria-label': 'Session tag',
+          onKeyDown: (event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              commit(event.target);
+            }
+          },
+          onBlur: (event) => commit(event.target),
+        }),
+        h(
+          'span',
+          { className: 'acc-spend__sub' },
+          session.tagSource === 'session'
+            ? 'this session'
+            : session.folderTag
+              ? `folder default · ${session.folderTag}`
+              : 'no tag yet',
+        ),
+      );
+    }
+
+    function Popover({ data, stale, onTag }) {
       const month = data !== null && data.month ? data.month : null;
       const week = data !== null && data.week ? data.week : null;
       const today = data !== null && data.today ? data.today : null;
@@ -159,6 +215,7 @@ window.__ModuleLoader__.load({
                     ),
                   )
                 : null,
+              data.session ? h(TagEditor, { session: data.session, onTag }) : null,
               h(Row, { label: today ? `Today · ${today.date.slice(5)}` : 'Today', bucket: todayBucket }),
               h(Row, { label: week ? `Week · ${week.key}` : 'Week', bucket: weekBucket }),
               h(Row, { label: month ? `Month · ${month.key}` : 'Month', bucket: monthBucket }),
@@ -242,6 +299,24 @@ window.__ModuleLoader__.load({
         };
       }, [open]);
 
+      const saveTag = React.useCallback(async (tag) => {
+        if (!sessionId) return false;
+        try {
+          const response = await fetch(TAG_ENDPOINT, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', accept: 'application/json' },
+            credentials: 'same-origin',
+            cache: 'no-store',
+            body: JSON.stringify({ session: sessionId, tag }),
+          });
+          if (!response.ok) return false;
+          await load();
+          return true;
+        } catch {
+          return false;
+        }
+      }, [sessionId, load]);
+
       const data = state.data;
       const stale = state.status === 'error';
       const ready = data !== null && data.today !== undefined;
@@ -302,7 +377,7 @@ window.__ModuleLoader__.load({
               )
             : h('span', { className: 'acc-spend__value' }, '—'),
         ),
-        open ? h(Popover, { data, stale }) : null,
+        open ? h(Popover, { data, stale, onTag: saveTag }) : null,
       );
     }
 

@@ -19,6 +19,7 @@ import { DEFAULT_HOLIDAYS, PEAK_RATES } from './lib/pricing.mjs'
 import { clearCache, collectUsage, defaultCachePath, resolveDataDir } from './lib/session-store.mjs'
 import { summarize } from './lib/aggregate.mjs'
 import { attachKeyUsage } from './lib/api-key.mjs'
+import { loadSessionTags } from './lib/session-tags.mjs'
 import { renderCsv, renderMarkdown, renderText, toJson } from './lib/report.mjs'
 
 async function packageVersion() {
@@ -76,6 +77,7 @@ async function main(argv) {
   })
 
   const rates = mergeRates(settings.rates)
+  const sessionTags = await loadSessionTags(settings.dataDir)
   const model = summarize(files, {
     tz: settings.tz,
     nowMs: settings.nowMs,
@@ -85,6 +87,7 @@ async function main(argv) {
     rates,
     holidays: settings.holidays ?? DEFAULT_HOLIDAYS,
     tags: settings.tags,
+    sessionTags,
   })
 
   await attachKeyUsage(model, files, {

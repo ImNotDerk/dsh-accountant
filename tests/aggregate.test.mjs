@@ -191,12 +191,19 @@ test('session totals are per log, tagged, and newest first', () => {
   ]
   files[1].cwd = '/Users/derk/work/acme'
 
-  const rows = sessionTotals(files, { tz: 'UTC', fxRate: 62, tags: { work: ['/Users/derk/work'] } })
+  const rows = sessionTotals(files, {
+    tz: 'UTC',
+    fxRate: 62,
+    tags: { work: ['/Users/derk/work'] },
+    sessionTags: { 'session-a': 'passion' },
+  })
   assert.equal(rows.length, 2)
   assert.equal(rows[0].id, 'session-b')
   assert.equal(rows[0].tag, 'work')
+  assert.equal(rows[0].tagSource, 'folder')
   assert.equal(rows[0].label, 'acme')
   assert.equal(rows[0].usd, 0.3)
   assert.equal(rows[1].id, 'session-a')
-  assert.equal(rows[1].tag, null)
+  assert.equal(rows[1].tag, 'passion')
+  assert.equal(rows[1].tagSource, 'session')
 })

@@ -108,6 +108,13 @@ shown under its folder name, so past sessions are already grouped without any
 configuration. Adding or changing tags reclassifies history on the next read;
 the panel picks it up on its next poll.
 
+Tag one session from the panel itself: open the chip and type into **Tag**.
+That writes `<DSH_HOME>/accountant.session-tags.json` (`{ version, tags }`,
+keyed by session id) and outranks the folder mapping; an empty value clears it
+and falls back to the folder default. The CLI reads the same file, so a tag set
+in the app appears in `--group session` on its next run. The write route accepts
+same-origin JSON POSTs only.
+
 It polls once a minute, refreshes when opened, and shows `—` rather than a
 guess when the host is not answering. It reads a read-only, loopback-only
 `GET /accountant/spend` route, so the browser can never write anything through
