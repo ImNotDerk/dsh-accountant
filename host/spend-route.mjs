@@ -19,10 +19,11 @@ import { attachKeyUsage, resolveActiveKey } from '../skills/accountant/scripts/l
 import { loadConfig, normalizeTags } from '../skills/accountant/scripts/lib/config.mjs'
 import { DEFAULT_FX, DEFAULT_HOLIDAYS, PEAK_RATES, tariffAt } from '../skills/accountant/scripts/lib/pricing.mjs'
 import { collectUsage, defaultCachePath, resolveDataDir } from '../skills/accountant/scripts/lib/session-store.mjs'
-import { loadSessionTags, normalizeTag, saveSessionTag } from '../skills/accountant/scripts/lib/session-tags.mjs'
+import { loadSessionTags, loadTagAliases, moveSessionTag, normalizeTag, resolveTag, saveSessionTag } from '../skills/accountant/scripts/lib/session-tags.mjs'
 
 export const SPEND_PATH = '/accountant/spend'
 export const TAG_PATH = '/accountant/tag'
+export const MOVE_PATH = '/accountant/tag/move'
 export const BALANCE_URL = 'https://api.deepseek.com/user/balance'
 
 const TTL_MS = 20_000
@@ -121,7 +122,7 @@ export function tagRollup(sessions) {
 }
 
 /** One session's row, or null when no log carries that id. */
-function sessionRow(files, sessionId, settings, sessionTags) {
+function sessionRow(files, sessionId, settings, sessionTags, tagAliases) {
   const file = files.find((entry) => entry.sessionId === sessionId)
   if (file === undefined) return null
   const [row] = sessionTotals([file], {
@@ -131,6 +132,7 @@ function sessionRow(files, sessionId, settings, sessionTags) {
     rates: settings.rates,
     tags: settings.tags,
     sessionTags,
+    tagAliases,
   })
   return row ?? null
 }
@@ -139,6 +141,7 @@ async function compute(sessionId) {
   const dataDir = resolveDataDir()
   const settings = await settingsFor(dataDir)
   const sessionTags = await loadSessionTags(dataDir)
+  const tagAliases = await loadTagAliases(dataDir)
   const { files } = await collectUsage({ dataDir, cachePath: defaultCachePath(dataDir) })
   const model = summarize(files, {
     tz: settings.tz,
@@ -147,13 +150,16 @@ async function compute(sessionId) {
     rates: settings.rates,
     tags: settings.tags,
     sessionTags,
+    tagAliases,
   })
   await attachKeyUsage(model, files, { dataDir, ...settings })
   model.balance = await fetchBalance(dataDir)
   model.tariff = tariffSnapshot(settings.holidays)
   const body = snapshot(model)
-  body.session = sessionId === null ? null : sessionRow(files, sessionId, settings, sessionTags)
-  body.tagOptions = [...new Set([...Object.keys(settings.tags), ...Object.values(sessionTags)])].sort()
+  body.session = sessionId === null ? null : sessionRow(files, sessionId, settings, sessionTags, tagAliases)
+  body.tagOptions = [...new Set(
+    [...Object.keys(settings.tags), ...Object.values(sessionTags)].map((tag) => resolveTag(tag, tagAliases)),
+  )].sort()
   body.byTag = tagRollup(model.sessions)
   return body
 }
@@ -305,4 +311,33 @@ export function registerTagRoute(ctx) {
     }
   }
   return ctx.webServer.register({ kind: 'exact', path: TAG_PATH, handler })
+}
+
+/**
+ * Register the tag-move route: retire `from` by moving its sessions to `to`.
+ * Folder-derived tags move through the alias recorded by `moveSessionTag`.
+ *
+ * @returns {() => void} disposer that removes the route
+ */
+export function registerMoveRoute(ctx) {
+  const handler = async (req, res) => {
+    if (!sameOrigin(req)) return sendJson(res, 403, { error: 'origin not allowed' })
+    if (req.method !== 'POST') return sendJson(res, 405, { error: 'method not allowed' }, { allow: 'POST' })
+    if (!String(req.headers['content-type'] ?? '').startsWith('application/json')) {
+      return sendJson(res, 415, { error: 'application/json required' })
+    }
+    try {
+      const parsed = JSON.parse(await readBody(req))
+      const from = normalizeTag(parsed?.from)
+      const to = normalizeTag(parsed?.to)
+      if (from === null || to === null) return sendJson(res, 400, { error: 'from and to must be tags' })
+      if (from === to) return sendJson(res, 400, { error: 'from and to must differ' })
+      const result = await moveSessionTag(resolveDataDir(), from, to)
+      spendCache.clear()
+      return sendJson(res, 200, { ok: true, ...result })
+    } catch {
+      return sendJson(res, 500, { error: 'cannot update the tags file' })
+    }
+  }
+  return ctx.webServer.register({ kind: 'exact', path: MOVE_PATH, handler })
 }

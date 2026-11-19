@@ -6,6 +6,7 @@ window.__ModuleLoader__.load({
 
     const ENDPOINT = '/accountant/spend';
     const TAG_ENDPOINT = '/accountant/tag';
+    const MOVE_ENDPOINT = '/accountant/tag/move';
     const POLL_MS = 60_000;
 
     const CSS = `
@@ -54,7 +55,7 @@ window.__ModuleLoader__.load({
         padding: 16px; background: rgba(0, 0, 0, 0.35);
       }
       .acc-spend__modal {
-        width: 400px; max-width: 100%; max-height: 70vh; overflow: auto;
+        width: 460px; max-width: 100%; max-height: 70vh; overflow: auto;
         padding: 14px 16px 12px; border-radius: 14px;
         border: 1px solid var(--dsw-alias-border-l2, rgba(127, 127, 127, 0.28));
         background: var(--dsw-alias-bg-overlay, #fff);
@@ -76,6 +77,7 @@ window.__ModuleLoader__.load({
       .acc-spend__table th:first-child, .acc-spend__table td:first-child { text-align: left; }
       .acc-spend__table td { padding: 6px 0; border-top: 1px solid var(--dsw-alias-border-l1, rgba(127, 127, 127, 0.16)); }
       .acc-spend__table td:not(:first-child), .acc-spend__table th:not(:first-child) { text-align: right; }
+      .acc-spend__movesel { width: 116px; font-size: 12px; }
 
       .acc-spend__pop {
         position: absolute; top: calc(100% + 8px); right: 0; z-index: 40;
@@ -169,7 +171,7 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function TagSpendModal({ rows, onClose }) {
+    function TagSpendModal({ rows, options = [], onMove, onClose }) {
       React.useEffect(() => {
         const onKey = (event) => {
           if (event.key === 'Escape') onClose();
@@ -206,7 +208,8 @@ window.__ModuleLoader__.load({
                   h('th', null, 'Sessions'),
                   h('th', null, 'Tokens'),
                   h('th', null, 'USD'),
-                  h('th', null, 'PHP'))),
+                  h('th', null, 'PHP'),
+                  h('th', { 'aria-label': 'Move to another tag' }, ''))),
                 h('tbody', null, rows.map((row) => h(
                   'tr',
                   { key: row.tag },
@@ -215,6 +218,27 @@ window.__ModuleLoader__.load({
                   h('td', null, tokens(row.tokens)),
                   h('td', null, dollars(row.usd)),
                   h('td', null, peso(row.php)),
+                  h(
+                    'td',
+                    null,
+                    row.tag === 'untagged'
+                      ? null
+                      : h(
+                          'select',
+                          {
+                            className: 'acc-spend__taginput acc-spend__movesel',
+                            value: '',
+                            'aria-label': `Move ${row.tag} to another tag`,
+                            onChange: (event) => {
+                              if (event.target.value !== '') onMove(row.tag, event.target.value);
+                            },
+                          },
+                          h('option', { value: '' }, 'Move to…'),
+                          options
+                            .filter((tag) => tag !== row.tag)
+                            .map((tag) => h('option', { key: tag, value: tag }, tag)),
+                        ),
+                  ),
                 ))),
               ),
           h('div', { className: 'acc-spend__foot' }, 'All recorded sessions · estimates, not an invoice.'),
@@ -452,6 +476,23 @@ window.__ModuleLoader__.load({
         }
       }, [sessionId, load]);
 
+      const moveTag = React.useCallback(async (from, to) => {
+        try {
+          const response = await fetch(MOVE_ENDPOINT, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', accept: 'application/json' },
+            credentials: 'same-origin',
+            cache: 'no-store',
+            body: JSON.stringify({ from, to }),
+          });
+          if (!response.ok) return false;
+          await load();
+          return true;
+        } catch {
+          return false;
+        }
+      }, [load]);
+
       const data = state.data;
       const stale = state.status === 'error';
       const ready = data !== null && data.today !== undefined;
@@ -530,7 +571,12 @@ window.__ModuleLoader__.load({
           },
         }) : null,
         tagModal && data !== null
-          ? h(TagSpendModal, { rows: data.byTag ?? [], onClose: () => setTagModal(false) })
+          ? h(TagSpendModal, {
+              rows: data.byTag ?? [],
+              options: data.tagOptions ?? [],
+              onMove: moveTag,
+              onClose: () => setTagModal(false),
+            })
           : null,
       );
     }

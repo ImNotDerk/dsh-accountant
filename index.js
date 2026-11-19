@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { registerSpendRoute, registerTagRoute } from './host/spend-route.mjs'
+import { registerMoveRoute, registerSpendRoute, registerTagRoute } from './host/spend-route.mjs'
 
 /**
  * Skill provider for `accountant`.
@@ -108,11 +108,13 @@ export function apply(ctx) {
   if (typeof ctx.inject !== 'function') return
   ctx.inject(['webServer'], (scope) => {
     scope.effect(() => {
-      const disposeSpend = registerSpendRoute(scope)
-      const disposeTag = registerTagRoute(scope)
+      const disposers = [
+        registerSpendRoute(scope),
+        registerTagRoute(scope),
+        registerMoveRoute(scope),
+      ]
       return () => {
-        disposeSpend()
-        disposeTag()
+        for (const dispose of disposers) dispose()
       }
     }, 'accountant: spend and tag routes')
   })

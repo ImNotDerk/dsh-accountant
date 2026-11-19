@@ -207,3 +207,21 @@ test('session totals are per log, tagged, and newest first', () => {
   assert.equal(rows[1].tag, 'passion')
   assert.equal(rows[1].tagSource, 'session')
 })
+
+test('a tag alias is applied to both session and folder tags', () => {
+  const files = [
+    sessionFile({ '2026-11-10': { 2: { 'deepseek-official/deepseek-flash': bucket({ input: 1_000_000 }) } } }, 'session-a'),
+    sessionFile({ '2026-11-11': { 2: { 'deepseek-official/deepseek-flash': bucket({ input: 1_000_000 }) } } }, 'session-b'),
+  ]
+  files[0].cwd = '/Users/derk/work/acme'
+  files[1].cwd = '/Users/derk/notes'
+
+  const rows = sessionTotals(files, {
+    tz: 'UTC',
+    fxRate: 62,
+    tags: { work: ['/Users/derk/work'], personal: ['/Users/derk'] },
+    sessionTags: { 'session-b': 'passion' },
+    tagAliases: { passion: 'personal', work: 'personal' },
+  })
+  assert.deepEqual(rows.map((row) => row.tag), ['personal', 'personal'])
+})

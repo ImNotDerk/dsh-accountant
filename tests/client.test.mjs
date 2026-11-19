@@ -355,6 +355,36 @@ test('the panel opens a modal with spend by tag', async () => {
   assert.equal(find(closed, (node) => node.props && node.props['aria-label'] === 'Spend by tag'), null)
 })
 
+test('the modal can move one tag to another', async () => {
+  const payload = {
+    ...PAYLOAD,
+    tagOptions: ['personal', 'work'],
+    byTag: [
+      { tag: 'personal', sessions: 2, tokens: 3_000_000, usd: 1.2, php: 74.4, requests: 10 },
+      { tag: 'work', sessions: 1, tokens: 1_000_000, usd: 0.3, php: 18.6, requests: 5 },
+    ],
+  }
+  const { calls, render } = await loadBundle({ payload })
+  await render()
+  const loaded = await render()
+  find(loaded, (node) => node.type === 'button').props.onClick()
+
+  const open = await render()
+  find(open, (node) => node.type === 'button' && String(node.props.className).includes('acc-spend__more')).props.onClick()
+
+  const withModal = await render()
+  const move = find(
+    withModal,
+    (node) => node.type === 'select' && String(node.props['aria-label']).startsWith('Move personal'),
+  )
+  assert.notEqual(move, null)
+
+  move.props.onChange({ target: { value: 'work' } })
+  const post = calls.find((call) => call.init && call.init.method === 'POST')
+  assert.equal(post.url, '/accountant/tag/move')
+  assert.deepEqual(JSON.parse(post.init.body), { from: 'personal', to: 'work' })
+})
+
 test('an unreachable endpoint shows a dash, never a made-up number', async () => {
   const { render } = await loadBundle({ payload: null, ok: false })
   await render()

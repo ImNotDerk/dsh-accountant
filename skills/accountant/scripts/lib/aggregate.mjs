@@ -10,6 +10,7 @@
 
 import { DAY_MS, HOUR_MS, addDays, daysInMonth, isoWeek, isoWeekday, localDate, zonedParts } from './calendar.mjs'
 import { DEFAULT_FX, DEFAULT_HOLIDAYS, PEAK_RATES, costOf, isPeakUtc, toPhp } from './pricing.mjs'
+import { resolveTag } from './session-tags.mjs'
 
 function emptyDay(date) {
   return {
@@ -170,7 +171,7 @@ export function folderLabel(cwd) {
 
 /** One row per session log, newest first. An explicit session tag outranks the folder tag. */
 export function sessionTotals(files, options = {}) {
-  const { tags = {}, sessionTags = {}, since, until } = options
+  const { tags = {}, sessionTags = {}, tagAliases = {}, since, until } = options
   const rows = []
   for (const file of files) {
     const { days } = buildDays([file], options)
@@ -179,13 +180,14 @@ export function sessionTotals(files, options = {}) {
     const id = file.sessionId ?? file.path
     const folderTag = tagForCwd(file.cwd, tags)
     const ownTag = sessionTags[id] ?? null
+    const rawTag = ownTag ?? folderTag
     rows.push({
       id,
       cwd: file.cwd ?? null,
       label: folderLabel(file.cwd),
       folderTag,
       ownTag,
-      tag: ownTag ?? folderTag,
+      tag: rawTag === null ? null : resolveTag(rawTag, tagAliases),
       tagSource: ownTag !== null ? 'session' : folderTag !== null ? 'folder' : null,
       from: kept[0].date,
       to: kept.at(-1).date,
@@ -231,6 +233,7 @@ export function summarize(files, options = {}) {
     fx = DEFAULT_FX,
     tags = {},
     sessionTags = {},
+    tagAliases = {},
   } = options
 
   const { days: allDays, unknownModels } = buildDays(files, { tz, rates, holidays, fxRate: fx.rate })
@@ -299,7 +302,7 @@ export function summarize(files, options = {}) {
     totals: totalOf(days),
     models: [...modelTotals.values()].sort((a, b) => b.usd - a.usd),
     unknownModels,
-    sessions: sessionTotals(files, { tz, rates, holidays, fxRate: fx.rate, tags, sessionTags, since, until }),
+    sessions: sessionTotals(files, { tz, rates, holidays, fxRate: fx.rate, tags, sessionTags, tagAliases, since, until }),
     summary: {
       today: { date: now.date, ...totalOf([today]) },
       week: {

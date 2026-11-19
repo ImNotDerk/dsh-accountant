@@ -117,6 +117,12 @@ open, the chip also shows the session's tag. The CLI reads the same file, so a
 tag set in the app appears in `--group session` on its next run. The write route
 accepts same-origin JSON POSTs only.
 
+Retiring a tag is done from the **Spend by tag** modal: each row has a
+**Move to…** menu. Choosing a destination rewrites that tag's explicit session
+tags and records an alias, so sessions that inherited the old tag from a folder
+follow it too. The file then carries `aliases` (`{ "old": "new" }`), which tag
+resolution follows (including chains).
+
 The panel's **Spend by tag** button opens a modal with the all-time totals per
 tag — sessions, tokens, USD, and PHP — so a tagged session shows up there next
 to its category.

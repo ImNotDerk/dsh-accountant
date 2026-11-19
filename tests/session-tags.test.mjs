@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { loadSessionTags, normalizeTag, saveSessionTag, sessionTagsPath } from '../skills/accountant/scripts/lib/session-tags.mjs'
+import { loadSessionTags, loadTagAliases, moveSessionTag, normalizeTag, resolveTag, saveSessionTag, sessionTagsPath } from '../skills/accountant/scripts/lib/session-tags.mjs'
 
 async function withDir(fn) {
   const dir = await mkdtemp(join(tmpdir(), 'accountant-tags-'))
@@ -45,3 +45,37 @@ test('a corrupt or foreign tags file is treated as empty', () => withDir(async (
   await writeFile(sessionTagsPath(dir), JSON.stringify({ version: 9, tags: { a: 'work' } }), 'utf8')
   assert.deepEqual(await loadSessionTags(dir), {})
 }))
+
+test('two saves at once keep both tags', () => withDir(async (dir) => {
+  await Promise.all([
+    saveSessionTag(dir, 'session-a', 'work'),
+    saveSessionTag(dir, 'session-b', 'personal'),
+  ])
+  assert.deepEqual(await loadSessionTags(dir), { 'session-a': 'work', 'session-b': 'personal' })
+}))
+
+test('a save refuses to overwrite a file it cannot read', () => withDir(async (dir) => {
+  await writeFile(sessionTagsPath(dir), '{ broken', 'utf8')
+  await assert.rejects(() => saveSessionTag(dir, 'session-a', 'work'))
+  assert.equal(await readFile(sessionTagsPath(dir), 'utf8'), '{ broken')
+  assert.deepEqual(await loadSessionTags(dir), {})
+}))
+
+test('moving a tag remaps overrides and records an alias', () => withDir(async (dir) => {
+  await saveSessionTag(dir, 'session-a', 'passion')
+  await saveSessionTag(dir, 'session-b', 'work')
+  const result = await moveSessionTag(dir, 'passion', 'personal')
+  assert.deepEqual(result, { from: 'passion', to: 'personal', moved: 1 })
+  assert.deepEqual(await loadSessionTags(dir), { 'session-a': 'personal', 'session-b': 'work' })
+  assert.deepEqual(await loadTagAliases(dir), { passion: 'personal' })
+
+  // A later save keeps the alias.
+  await saveSessionTag(dir, 'session-c', 'plugins')
+  assert.deepEqual(await loadTagAliases(dir), { passion: 'personal' })
+}))
+
+test('alias resolution follows chains and stops on a loop', () => {
+  assert.equal(resolveTag('old', { old: 'middle', middle: 'new' }), 'new')
+  assert.equal(resolveTag('plain', {}), 'plain')
+  assert.equal(resolveTag('a', { a: 'b', b: 'a' }), 'a')
+})
