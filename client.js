@@ -38,6 +38,7 @@ window.__ModuleLoader__.load({
       .acc-spend__php { font-variant-numeric: tabular-nums; opacity: 0.72; font-weight: 500; }
       .acc-spend__tariff { font-size: 10.5px; opacity: 0.6; letter-spacing: 0.02em; }
       .acc-spend__tariff[data-peak='true'] { color: #c9962c; opacity: 0.95; }
+      .acc-spend__tagchip { font-size: 10.5px; opacity: 0.75; }
 
       .acc-spend__pop {
         position: absolute; top: calc(100% + 8px); right: 0; z-index: 40;
@@ -131,47 +132,87 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function TagEditor({ session, onTag }) {
-      // A ref, not state: disabling the input mid-save would blur it and fire
-      // the same save again.
+    function TagEditor({ session, options, onTag }) {
+      // A ref, not state: disabling the select mid-save would fire the change again.
       const saving = React.useRef(false);
+      const [adding, setAdding] = React.useState(false);
 
-      const commit = async (element) => {
-        if (saving.current) return;
+      const save = async (tag) => {
+        if (saving.current) return false;
         saving.current = true;
-        const raw = element.value.trim();
-        const ok = await onTag(raw === '' ? null : raw);
+        const ok = await onTag(tag);
         saving.current = false;
-        if (!ok) element.value = session.ownTag ?? '';
+        return ok;
+      };
+
+      const onChange = async (event) => {
+        const value = event.target.value;
+        if (value === '__new') {
+          setAdding(true);
+          return;
+        }
+        await save(value === '' ? null : value);
+      };
+
+      const commitNew = async (event) => {
+        const tag = event.target.value.trim();
+        if (tag === '') {
+          setAdding(false);
+          return;
+        }
+        if (await save(tag)) setAdding(false);
       };
 
       return h(
         'div',
-        { className: 'acc-spend__row' },
-        h('span', { className: 'acc-spend__key' }, 'Tag'),
-        h('input', {
-          className: 'acc-spend__taginput',
-          defaultValue: session.ownTag ?? '',
-          placeholder: session.folderTag ?? session.label,
-          maxLength: 40,
-          'aria-label': 'Session tag',
-          onKeyDown: (event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              commit(event.target);
-            }
-          },
-          onBlur: (event) => commit(event.target),
-        }),
+        null,
         h(
-          'span',
-          { className: 'acc-spend__sub' },
-          session.tagSource === 'session'
-            ? 'this session'
-            : session.folderTag
-              ? `folder default · ${session.folderTag}`
-              : 'no tag yet',
+          'div',
+          { className: 'acc-spend__row' },
+          h('span', { className: 'acc-spend__key' }, 'Tag'),
+          h(
+            'select',
+            {
+              className: 'acc-spend__taginput',
+              value: adding ? '__new' : session.ownTag ?? '',
+              'aria-label': 'Session tag',
+              onChange,
+            },
+            h('option', { value: '' }, session.folderTag ? `Folder default: ${session.folderTag}` : 'No tag'),
+            options.map((tag) => h('option', { key: tag, value: tag }, tag)),
+            h('option', { value: '__new' }, '+ New tag…'),
+          ),
+          h(
+            'span',
+            { className: 'acc-spend__sub' },
+            session.tagSource === 'session'
+              ? 'this session'
+              : session.folderTag
+                ? `folder default · ${session.folderTag}`
+                : 'no tag yet',
+          ),
         ),
+        adding
+          ? h(
+              'div',
+              { className: 'acc-spend__row' },
+              h('span', { className: 'acc-spend__key' }, 'New tag'),
+              h('input', {
+                className: 'acc-spend__taginput',
+                placeholder: 'e.g. passion',
+                maxLength: 40,
+                autoFocus: true,
+                'aria-label': 'New session tag',
+                onKeyDown: (event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    commitNew(event);
+                  }
+                },
+                onBlur: commitNew,
+              }),
+            )
+          : null,
       );
     }
 
@@ -215,7 +256,7 @@ window.__ModuleLoader__.load({
                     ),
                   )
                 : null,
-              data.session ? h(TagEditor, { session: data.session, onTag }) : null,
+              data.session ? h(TagEditor, { session: data.session, options: data.tagOptions ?? [], onTag }) : null,
               h(Row, { label: today ? `Today · ${today.date.slice(5)}` : 'Today', bucket: todayBucket }),
               h(Row, { label: week ? `Week · ${week.key}` : 'Week', bucket: weekBucket }),
               h(Row, { label: month ? `Month · ${month.key}` : 'Month', bucket: monthBucket }),
@@ -372,6 +413,14 @@ window.__ModuleLoader__.load({
                         { className: 'acc-spend__tariff', 'data-peak': data.tariff.peak ? 'true' : 'false' },
                         data.tariff.peak ? 'Peak' : 'Off-peak',
                       ),
+                    )
+                  : null,
+                ready && open && data.session && data.session.tag
+                  ? h(
+                      React.Fragment,
+                      null,
+                      h('span', { className: 'acc-spend__sep', 'aria-hidden': true }, '·'),
+                      h('span', { className: 'acc-spend__tagchip' }, data.session.tag),
                     )
                   : null,
               )

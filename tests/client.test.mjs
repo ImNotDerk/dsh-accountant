@@ -276,6 +276,7 @@ test('a peak tariff reads Peak on the chip', async () => {
 test('the panel can tag the session it is showing', async () => {
   const payload = {
     ...PAYLOAD,
+    tagOptions: ['personal', 'work'],
     session: {
       id: 'session-1',
       cwd: '/Users/derk/work/acme',
@@ -295,14 +296,26 @@ test('the panel can tag the session it is showing', async () => {
   const { calls, render } = await loadBundle({ payload })
   await render()
   const loaded = await render()
-  find(loaded, (node) => node.type === 'button').props.onClick()
+
+  // The tag reaches the pill only while the panel is expanded.
+  const closedButton = find(loaded, (node) => node.type === 'button')
+  assert.doesNotMatch(textOf(closedButton), /work/)
+  closedButton.props.onClick()
 
   const open = await render()
-  const input = find(open, (node) => node.type === 'input')
-  assert.notEqual(input, null)
-  assert.equal(input.props.placeholder, 'work')
+  assert.match(textOf(find(open, (node) => node.type === 'button')), /work/)
 
-  await input.props.onBlur({ target: { value: 'passion' } })
+  const select = find(open, (node) => node.type === 'select')
+  assert.notEqual(select, null)
+  const values = (select.props.children ?? []).map((child) => child.props?.value)
+  assert.deepEqual(values, ['', 'personal', 'work', '__new'])
+
+  await select.props.onChange({ target: { value: '__new' } })
+  const withInput = await render()
+  const input = find(withInput, (node) => node.type === 'input')
+  assert.notEqual(input, null)
+
+  await input.props.onKeyDown({ key: 'Enter', preventDefault() {}, target: { value: 'passion' } })
   const post = calls.find((call) => call.init && call.init.method === 'POST')
   assert.equal(post.url, '/accountant/tag')
   assert.deepEqual(JSON.parse(post.init.body), { session: 'session-1', tag: 'passion' })

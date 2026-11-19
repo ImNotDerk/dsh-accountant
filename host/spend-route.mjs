@@ -137,6 +137,7 @@ async function compute(sessionId) {
   model.tariff = tariffSnapshot(settings.holidays)
   const body = snapshot(model)
   body.session = sessionId === null ? null : sessionRow(files, sessionId, settings, sessionTags)
+  body.tagOptions = [...new Set([...Object.keys(settings.tags), ...Object.values(sessionTags)])].sort()
   return body
 }
 
@@ -187,25 +188,25 @@ function tariffSnapshot(holidays) {
  *
  * @returns {() => void} disposer that removes the route
  */
-export function registerSpendRoute(ctx) {
-  const cache = new Map()
-  const pending = new Map()
+const spendCache = new Map()
+const spendPending = new Map()
 
+export function registerSpendRoute(ctx) {
   const resource = async (request) => {
     try {
       const raw = new URL(request.url).searchParams.get('session')
       const sessionId = typeof raw === 'string' && raw.length > 0 && raw.length <= 128 ? raw : null
       const key = sessionId ?? ''
-      const hit = cache.get(key)
+      const hit = spendCache.get(key)
       if (hit !== undefined && Date.now() - hit.at < TTL_MS) return json(hit.body)
-      let job = pending.get(key)
+      let job = spendPending.get(key)
       if (job === undefined) {
-        job = compute(sessionId).finally(() => { pending.delete(key) })
-        pending.set(key, job)
+        job = compute(sessionId).finally(() => { spendPending.delete(key) })
+        spendPending.set(key, job)
       }
       const body = await job
-      if (cache.size > 20) cache.clear()
-      cache.set(key, { at: Date.now(), body })
+      if (spendCache.size > 20) spendCache.clear()
+      spendCache.set(key, { at: Date.now(), body })
       return json(body)
     } catch (error) {
       return json({ error: String(error?.message ?? error) }, 503)
@@ -280,6 +281,7 @@ export function registerTagRoute(ctx) {
         return sendJson(res, 400, { error: 'tag must be 1-40 printable characters' })
       }
       const tag = await saveSessionTag(resolveDataDir(), sessionId, raw)
+      spendCache.clear()
       return sendJson(res, 200, { ok: true, tag })
     } catch {
       return sendJson(res, 400, { error: 'bad request' })
