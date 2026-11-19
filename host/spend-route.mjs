@@ -14,9 +14,9 @@
  * @module dsh-accountant/spend-route
  */
 
-import { summarize } from '../skills/accountant/scripts/lib/aggregate.mjs'
+import { sessionTotals, summarize } from '../skills/accountant/scripts/lib/aggregate.mjs'
 import { attachKeyUsage, resolveActiveKey } from '../skills/accountant/scripts/lib/api-key.mjs'
-import { loadConfig } from '../skills/accountant/scripts/lib/config.mjs'
+import { loadConfig, normalizeTags } from '../skills/accountant/scripts/lib/config.mjs'
 import { DEFAULT_FX, DEFAULT_HOLIDAYS, PEAK_RATES, tariffAt } from '../skills/accountant/scripts/lib/pricing.mjs'
 import { collectUsage, defaultCachePath, resolveDataDir } from '../skills/accountant/scripts/lib/session-store.mjs'
 
@@ -97,10 +97,25 @@ async function settingsFor(dataDir) {
     fx: { ...DEFAULT_FX, rate, asOf: config.fxAsOf ?? DEFAULT_FX.asOf },
     holidays: Array.isArray(config.holidays) ? new Set(config.holidays) : DEFAULT_HOLIDAYS,
     rates: config.models ?? PEAK_RATES,
+    tags: normalizeTags(config.tags),
   }
 }
 
-async function compute() {
+/** One session's row, or null when no log carries that id. */
+function sessionRow(files, sessionId, settings) {
+  const file = files.find((entry) => entry.sessionId === sessionId)
+  if (file === undefined) return null
+  const [row] = sessionTotals([file], {
+    tz: settings.tz,
+    fxRate: settings.fx.rate,
+    holidays: settings.holidays,
+    rates: settings.rates,
+    tags: settings.tags,
+  })
+  return row ?? null
+}
+
+async function compute(sessionId) {
   const dataDir = resolveDataDir()
   const settings = await settingsFor(dataDir)
   const { files } = await collectUsage({ dataDir, cachePath: defaultCachePath(dataDir) })
@@ -109,11 +124,14 @@ async function compute() {
     fx: settings.fx,
     holidays: settings.holidays,
     rates: settings.rates,
+    tags: settings.tags,
   })
   await attachKeyUsage(model, files, { dataDir, ...settings })
   model.balance = await fetchBalance(dataDir)
   model.tariff = tariffSnapshot(settings.holidays)
-  return snapshot(model)
+  const body = snapshot(model)
+  body.session = sessionId === null ? null : sessionRow(files, sessionId, settings)
+  return body
 }
 
 /**
@@ -164,18 +182,25 @@ function tariffSnapshot(holidays) {
  * @returns {() => void} disposer that removes the route
  */
 export function registerSpendRoute(ctx) {
-  let cached = null
-  let cachedAt = 0
-  let pending = null
+  const cache = new Map()
+  const pending = new Map()
 
-  const resource = async () => {
+  const resource = async (request) => {
     try {
-      const now = Date.now()
-      if (cached !== null && now - cachedAt < TTL_MS) return json(cached)
-      pending ??= compute().finally(() => { pending = null })
-      cached = await pending
-      cachedAt = Date.now()
-      return json(cached)
+      const raw = new URL(request.url).searchParams.get('session')
+      const sessionId = typeof raw === 'string' && raw.length > 0 && raw.length <= 128 ? raw : null
+      const key = sessionId ?? ''
+      const hit = cache.get(key)
+      if (hit !== undefined && Date.now() - hit.at < TTL_MS) return json(hit.body)
+      let job = pending.get(key)
+      if (job === undefined) {
+        job = compute(sessionId).finally(() => { pending.delete(key) })
+        pending.set(key, job)
+      }
+      const body = await job
+      if (cache.size > 20) cache.clear()
+      cache.set(key, { at: Date.now(), body })
+      return json(body)
     } catch (error) {
       return json({ error: String(error?.message ?? error) }, 503)
     }

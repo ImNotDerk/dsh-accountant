@@ -146,6 +146,19 @@ window.__ModuleLoader__.load({
           : h(
               React.Fragment,
               null,
+              data.session
+                ? h(
+                    'div',
+                    { className: 'acc-spend__row' },
+                    h('span', { className: 'acc-spend__key' }, 'This session'),
+                    h('span', { className: 'acc-spend__peso' }, peso(data.session.php)),
+                    h(
+                      'span',
+                      { className: 'acc-spend__sub' },
+                      `${dollars(data.session.usd)} · ${tokens(data.session.tokens.total)} tokens · ${data.session.tag ?? data.session.label}`,
+                    ),
+                  )
+                : null,
               h(Row, { label: today ? `Today · ${today.date.slice(5)}` : 'Today', bucket: todayBucket }),
               h(Row, { label: week ? `Week · ${week.key}` : 'Week', bucket: weekBucket }),
               h(Row, { label: month ? `Month · ${month.key}` : 'Month', bucket: monthBucket }),
@@ -180,7 +193,7 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function SpendChip() {
+    function SpendChip({ sessionId }) {
       const [state, setState] = React.useState({ status: 'loading', data: null });
       const [open, setOpen] = React.useState(false);
       const rootRef = React.useRef(null);
@@ -189,7 +202,8 @@ window.__ModuleLoader__.load({
       const load = React.useCallback(async () => {
         if (typeof fetch !== 'function') return;
         try {
-          const response = await fetch(ENDPOINT, {
+          const url = sessionId ? `${ENDPOINT}?session=${encodeURIComponent(sessionId)}` : ENDPOINT;
+          const response = await fetch(url, {
             headers: { accept: 'application/json' },
             cache: 'no-store',
             credentials: 'same-origin',
@@ -200,7 +214,7 @@ window.__ModuleLoader__.load({
         } catch {
           if (aliveRef.current) setState({ status: 'error', data: null });
         }
-      }, []);
+      }, [sessionId]);
 
       React.useEffect(() => {
         aliveRef.current = true;
@@ -242,7 +256,9 @@ window.__ModuleLoader__.load({
           : `Today ${dollars(data.today.usd)} · ${peso(data.today.php)} · Week ${peso(data.week.php)} · Month ${peso(data.month.php)} · predicted month end ${peso(data.month.forecast.php)}`
         : stale
           ? 'Accountant: no data from the accounting endpoint'
-          : 'Accountant: reading token spend') + (ready && data.tariff
+          : 'Accountant: reading token spend') + (ready && data.session
+            ? ` · session ${dollars(data.session.usd)} ${peso(data.session.php)}`
+            : '') + (ready && data.tariff
             ? ` · ${data.tariff.peak ? 'peak' : 'off-peak'}${clock(data.tariff.changesAt, data.timezone) ? ` until ${clock(data.tariff.changesAt, data.timezone)}` : ''}`
             : '');
 
@@ -309,8 +325,9 @@ window.__ModuleLoader__.load({
               name: 'conversation.session.header.utilities',
               id: 'accountant-spend',
               order: 6,
+              inject: (sessionId) => ({ sessionId }),
             },
-            () => h(SpendChip),
+            SpendChip,
           ),
         );
       },

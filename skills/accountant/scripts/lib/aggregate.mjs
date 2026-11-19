@@ -148,6 +148,47 @@ export function windowTotals(files, options = {}) {
   return { ...totalOf(days), days: days.length }
 }
 
+/** Longest matching folder prefix for a session's cwd; null when nothing matches. */
+export function tagForCwd(cwd, tags) {
+  if (typeof cwd !== 'string' || cwd === '' || tags === undefined) return null
+  let match = null
+  for (const [tag, prefixes] of Object.entries(tags)) {
+    for (const prefix of prefixes) {
+      if ((cwd === prefix || cwd.startsWith(`${prefix}/`)) && (match === null || prefix.length > match.length)) {
+        match = { tag, length: prefix.length }
+      }
+    }
+  }
+  return match?.tag ?? null
+}
+
+/** Short folder name used when no tag matches. */
+export function folderLabel(cwd) {
+  if (typeof cwd !== 'string' || cwd === '') return 'unknown'
+  return cwd.split(/[\\/]/).filter(Boolean).at(-1) ?? cwd
+}
+
+/** One row per session log, newest first. */
+export function sessionTotals(files, options = {}) {
+  const { tags = {}, since, until } = options
+  const rows = []
+  for (const file of files) {
+    const { days } = buildDays([file], options)
+    const kept = filterRange(days, { since, until })
+    if (kept.length === 0) continue
+    rows.push({
+      id: file.sessionId ?? file.path,
+      cwd: file.cwd ?? null,
+      label: folderLabel(file.cwd),
+      tag: tagForCwd(file.cwd, tags),
+      from: kept[0].date,
+      to: kept.at(-1).date,
+      ...totalOf(kept),
+    })
+  }
+  return rows.sort((a, b) => b.to.localeCompare(a.to) || b.usd - a.usd)
+}
+
 function project(total, elapsed, span) {
   if (elapsed <= 0) return emptyTotal()
   const factor = span / elapsed
@@ -182,6 +223,7 @@ export function summarize(files, options = {}) {
     rates = PEAK_RATES,
     holidays = DEFAULT_HOLIDAYS,
     fx = DEFAULT_FX,
+    tags = {},
   } = options
 
   const { days: allDays, unknownModels } = buildDays(files, { tz, rates, holidays, fxRate: fx.rate })
@@ -250,6 +292,7 @@ export function summarize(files, options = {}) {
     totals: totalOf(days),
     models: [...modelTotals.values()].sort((a, b) => b.usd - a.usd),
     unknownModels,
+    sessions: sessionTotals(files, { tz, rates, holidays, fxRate: fx.rate, tags, since, until }),
     summary: {
       today: { date: now.date, ...totalOf([today]) },
       week: {

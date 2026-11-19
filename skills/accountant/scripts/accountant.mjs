@@ -84,6 +84,7 @@ async function main(argv) {
     fx: settings.fx,
     rates,
     holidays: settings.holidays ?? DEFAULT_HOLIDAYS,
+    tags: settings.tags,
   })
 
   await attachKeyUsage(model, files, {

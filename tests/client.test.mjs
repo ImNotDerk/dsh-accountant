@@ -79,7 +79,7 @@ function expand(node) {
   return { ...node, props: { ...node.props, children } }
 }
 
-async function loadBundle({ payload, ok = true }) {
+async function loadBundle({ payload, ok = true, sessionId = 'session-1' }) {
   const calls = []
   const runtime = createRuntime()
   const document = fakeDocument()
@@ -116,7 +116,11 @@ async function loadBundle({ payload, ok = true }) {
   /** Render the mounted component, run its effects, and settle. */
   const render = async () => {
     runtime.beginRender()
-    const tree = expand(registrations[0].render({}))
+    const registration = registrations[0]
+    const injected = typeof registration.options.inject === 'function'
+      ? registration.options.inject(sessionId)
+      : {}
+    const tree = expand(registration.render({ ...injected }))
     runtime.flushEffects()
     await tick()
     return tree
@@ -176,9 +180,38 @@ test('the chip fetches the host endpoint same-origin, uncached', async () => {
   const { calls, render } = await loadBundle({ payload: PAYLOAD })
   await render()
   assert.equal(calls.length, 1)
-  assert.equal(calls[0].url, '/accountant/spend')
+  assert.equal(calls[0].url, '/accountant/spend?session=session-1')
   assert.equal(calls[0].init.credentials, 'same-origin')
   assert.equal(calls[0].init.cache, 'no-store')
+})
+
+test('the panel shows this session with its tag', async () => {
+  const payload = {
+    ...PAYLOAD,
+    session: {
+      id: 'session-1',
+      cwd: '/Users/derk/work/acme',
+      label: 'acme',
+      tag: 'work',
+      from: '2026-11-11',
+      to: '2026-11-11',
+      tokens: { input: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0, total: 1_000_000 },
+      usd: 0.3,
+      php: 18.6,
+      requests: 2,
+    },
+  }
+  const { render } = await loadBundle({ payload })
+  await render()
+  const loaded = await render()
+
+  const button = find(loaded, (node) => node.type === 'button')
+  button.props.onClick()
+  const text = textOf(await render())
+  assert.match(text, /This session/)
+  assert.match(text, /₱18\.60/)
+  assert.match(text, /\$0\.30/)
+  assert.match(text, /work/)
 })
 
 test('the chip shows today in both currencies after the first fetch', async () => {
