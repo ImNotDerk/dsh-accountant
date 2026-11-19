@@ -104,6 +104,22 @@ async function settingsFor(dataDir) {
   }
 }
 
+/** All-time spend grouped by tag; untagged sessions still get a row. */
+export function tagRollup(sessions) {
+  const rows = new Map()
+  for (const session of sessions) {
+    const tag = session.tag ?? 'untagged'
+    const row = rows.get(tag) ?? { tag, sessions: 0, tokens: 0, usd: 0, php: 0, requests: 0 }
+    row.sessions += 1
+    row.tokens += session.tokens.total
+    row.usd += session.usd
+    row.php += session.php
+    row.requests += session.requests
+    rows.set(tag, row)
+  }
+  return [...rows.values()].sort((a, b) => b.usd - a.usd)
+}
+
 /** One session's row, or null when no log carries that id. */
 function sessionRow(files, sessionId, settings, sessionTags) {
   const file = files.find((entry) => entry.sessionId === sessionId)
@@ -138,6 +154,7 @@ async function compute(sessionId) {
   const body = snapshot(model)
   body.session = sessionId === null ? null : sessionRow(files, sessionId, settings, sessionTags)
   body.tagOptions = [...new Set([...Object.keys(settings.tags), ...Object.values(sessionTags)])].sort()
+  body.byTag = tagRollup(model.sessions)
   return body
 }
 

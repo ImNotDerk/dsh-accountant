@@ -321,6 +321,40 @@ test('the panel can tag the session it is showing', async () => {
   assert.deepEqual(JSON.parse(post.init.body), { session: 'session-1', tag: 'passion' })
 })
 
+test('the panel opens a modal with spend by tag', async () => {
+  const payload = {
+    ...PAYLOAD,
+    byTag: [
+      { tag: 'personal', sessions: 2, tokens: 3_000_000, usd: 1.2, php: 74.4, requests: 10 },
+      { tag: 'work', sessions: 1, tokens: 1_000_000, usd: 0.3, php: 18.6, requests: 5 },
+    ],
+  }
+  const { render } = await loadBundle({ payload })
+  await render()
+  const loaded = await render()
+  find(loaded, (node) => node.type === 'button').props.onClick()
+
+  const open = await render()
+  const more = find(open, (node) => node.type === 'button' && String(node.props.className).includes('acc-spend__more'))
+  assert.notEqual(more, null)
+  more.props.onClick()
+
+  const withModal = await render()
+  const dialog = find(withModal, (node) => node.props && node.props['aria-label'] === 'Spend by tag')
+  assert.notEqual(dialog, null)
+  const text = textOf(dialog)
+  assert.match(text, /Spend by tag/)
+  assert.match(text, /personal/)
+  assert.match(text, /work/)
+  assert.match(text, /\$1\.20/)
+  assert.match(text, /₱74\.40/)
+
+  const close = find(dialog, (node) => node.type === 'button' && node.props['aria-label'] === 'Close')
+  close.props.onClick()
+  const closed = await render()
+  assert.equal(find(closed, (node) => node.props && node.props['aria-label'] === 'Spend by tag'), null)
+})
+
 test('an unreachable endpoint shows a dash, never a made-up number', async () => {
   const { render } = await loadBundle({ payload: null, ok: false })
   await render()

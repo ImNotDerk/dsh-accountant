@@ -117,6 +117,10 @@ open, the chip also shows the session's tag. The CLI reads the same file, so a
 tag set in the app appears in `--group session` on its next run. The write route
 accepts same-origin JSON POSTs only.
 
+The panel's **Spend by tag** button opens a modal with the all-time totals per
+tag — sessions, tokens, USD, and PHP — so a tagged session shows up there next
+to its category.
+
 It polls once a minute, refreshes when opened, and shows `—` rather than a
 guess when the host is not answering. It reads a read-only, loopback-only
 `GET /accountant/spend` route, so the browser can never write anything through

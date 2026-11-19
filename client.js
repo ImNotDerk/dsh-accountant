@@ -40,6 +40,43 @@ window.__ModuleLoader__.load({
       .acc-spend__tariff[data-peak='true'] { color: #c9962c; opacity: 0.95; }
       .acc-spend__tagchip { font-size: 10.5px; opacity: 0.75; }
 
+      .acc-spend__more {
+        width: 100%; margin-top: 8px; padding: 6px 8px;
+        border: 1px solid var(--dsw-alias-border-l2, rgba(127, 127, 127, 0.28));
+        border-radius: 8px; background: transparent; color: inherit;
+        font: inherit; font-size: 12px; cursor: pointer;
+      }
+      .acc-spend__more:hover { background: var(--dsw-alias-bg-layer-2, rgba(127, 127, 127, 0.12)); }
+
+      .acc-spend__overlay {
+        position: fixed; inset: 0; z-index: 60;
+        display: flex; align-items: center; justify-content: center;
+        padding: 16px; background: rgba(0, 0, 0, 0.35);
+      }
+      .acc-spend__modal {
+        width: 400px; max-width: 100%; max-height: 70vh; overflow: auto;
+        padding: 14px 16px 12px; border-radius: 14px;
+        border: 1px solid var(--dsw-alias-border-l2, rgba(127, 127, 127, 0.28));
+        background: var(--dsw-alias-bg-overlay, #fff);
+        color: var(--dsw-alias-label-primary, currentColor);
+        box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+        font-size: 13px; line-height: 1.45;
+      }
+      .acc-spend__modalhead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; font-weight: 600; }
+      .acc-spend__close {
+        border: 0; background: transparent; color: inherit; cursor: pointer;
+        font: inherit; font-size: 18px; line-height: 1; padding: 2px 6px; border-radius: 6px; opacity: 0.7;
+      }
+      .acc-spend__close:hover { opacity: 1; background: var(--dsw-alias-bg-layer-2, rgba(127, 127, 127, 0.12)); }
+      .acc-spend__table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+      .acc-spend__table th {
+        text-align: right; font-weight: 550; font-size: 11px; opacity: 0.65;
+        padding: 3px 0;
+      }
+      .acc-spend__table th:first-child, .acc-spend__table td:first-child { text-align: left; }
+      .acc-spend__table td { padding: 6px 0; border-top: 1px solid var(--dsw-alias-border-l1, rgba(127, 127, 127, 0.16)); }
+      .acc-spend__table td:not(:first-child), .acc-spend__table th:not(:first-child) { text-align: right; }
+
       .acc-spend__pop {
         position: absolute; top: calc(100% + 8px); right: 0; z-index: 40;
         width: 320px; padding: 13px 13px 11px;
@@ -132,6 +169,59 @@ window.__ModuleLoader__.load({
       );
     }
 
+    function TagSpendModal({ rows, onClose }) {
+      React.useEffect(() => {
+        const onKey = (event) => {
+          if (event.key === 'Escape') onClose();
+        };
+        document.addEventListener('keydown', onKey);
+        return () => document.removeEventListener('keydown', onKey);
+      }, [onClose]);
+
+      return h(
+        'div',
+        { className: 'acc-spend__overlay', onClick: onClose },
+        h(
+          'div',
+          {
+            className: 'acc-spend__modal',
+            role: 'dialog',
+            'aria-modal': 'true',
+            'aria-label': 'Spend by tag',
+            onClick: (event) => event.stopPropagation(),
+          },
+          h(
+            'div',
+            { className: 'acc-spend__modalhead' },
+            h('span', null, 'Spend by tag'),
+            h('button', { type: 'button', className: 'acc-spend__close', 'aria-label': 'Close', onClick: onClose }, '×'),
+          ),
+          rows.length === 0
+            ? h('div', { className: 'acc-spend__empty' }, 'No sessions yet.')
+            : h(
+                'table',
+                { className: 'acc-spend__table' },
+                h('thead', null, h('tr', null,
+                  h('th', null, 'Tag'),
+                  h('th', null, 'Sessions'),
+                  h('th', null, 'Tokens'),
+                  h('th', null, 'USD'),
+                  h('th', null, 'PHP'))),
+                h('tbody', null, rows.map((row) => h(
+                  'tr',
+                  { key: row.tag },
+                  h('td', null, row.tag),
+                  h('td', null, row.sessions),
+                  h('td', null, tokens(row.tokens)),
+                  h('td', null, dollars(row.usd)),
+                  h('td', null, peso(row.php)),
+                ))),
+              ),
+          h('div', { className: 'acc-spend__foot' }, 'All recorded sessions · estimates, not an invoice.'),
+        ),
+      );
+    }
+
     function TagEditor({ session, options, onTag }) {
       // A ref, not state: disabling the select mid-save would fire the change again.
       const saving = React.useRef(false);
@@ -216,7 +306,7 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function Popover({ data, stale, onTag }) {
+    function Popover({ data, stale, onTag, onOpenTags }) {
       const month = data !== null && data.month ? data.month : null;
       const week = data !== null && data.week ? data.week : null;
       const today = data !== null && data.today ? data.today : null;
@@ -281,6 +371,9 @@ window.__ModuleLoader__.load({
                     h('span', { className: 'acc-spend__sub' }, 'account balance'),
                   )
                 : null,
+              data.byTag && data.byTag.length > 0
+                ? h('button', { type: 'button', className: 'acc-spend__more', onClick: onOpenTags }, `Spend by tag · ${data.byTag.length}`)
+                : null,
 
               h(
                 'div',
@@ -294,6 +387,7 @@ window.__ModuleLoader__.load({
     function SpendChip({ sessionId }) {
       const [state, setState] = React.useState({ status: 'loading', data: null });
       const [open, setOpen] = React.useState(false);
+      const [tagModal, setTagModal] = React.useState(false);
       const rootRef = React.useRef(null);
       const aliveRef = React.useRef(true);
 
@@ -426,7 +520,18 @@ window.__ModuleLoader__.load({
               )
             : h('span', { className: 'acc-spend__value' }, '—'),
         ),
-        open ? h(Popover, { data, stale, onTag: saveTag }) : null,
+        open ? h(Popover, {
+          data,
+          stale,
+          onTag: saveTag,
+          onOpenTags: () => {
+            setTagModal(true);
+            setOpen(false);
+          },
+        }) : null,
+        tagModal && data !== null
+          ? h(TagSpendModal, { rows: data.byTag ?? [], onClose: () => setTagModal(false) })
+          : null,
       );
     }
 
